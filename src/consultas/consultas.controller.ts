@@ -1,18 +1,16 @@
-import { Controller, Get, Post, Body, Patch, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, UseGuards, SetMetadata } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ConsultasService } from './consultas.service';
 import { UpdateConsultaDto } from './dto/update-consulta.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { Medico } from '../medicos/entities/medico.entity';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Consulta } from './entities/consulta.entity';
-import { Paciente } from '../pacientes/entities/paciente.entity';
 import { CreateConsultaAdminDto } from './dto/create-consulta-admin.dto';
+import { RolesGuard } from '../auth/guards/roles.guard';
 
 @ApiTags('Consultas')
 @Controller('consultas')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class ConsultasController {
   constructor(
@@ -20,6 +18,7 @@ export class ConsultasController {
   ) {}
 
   @Post('admin/create')
+  @SetMetadata('roles', ['admin'])
   @ApiOperation({ summary: 'Crear consulta pre-cargada (recepción)' })
   createFromAdmin(@Body() createConsultaAdminDto: CreateConsultaAdminDto) {
     return this.consultasService.createFromAdmin(createConsultaAdminDto);

@@ -7,10 +7,11 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { Medico } from '../medicos/entities/medico.entity';
+import { Admin } from './entities/admin.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Medico]),
+    TypeOrmModule.forFeature([Medico, Admin]),
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
