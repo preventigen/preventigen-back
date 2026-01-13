@@ -7,15 +7,15 @@ export class ActualizarGemeloDto {
     @IsUUID()
     consultaId: string;
 
-    @ApiProperty({ example: 'Se agregó diagnóstico de ansiedad. TA mejoró a 120/80' })
+    @ApiProperty({ example: 'Se inició tratamiento con Sumatriptán + Propranolol. Paciente toleró bien primera dosis. TA en control: 128/82' })
     @IsNotEmpty()
     cambiosRealizados: string;
 
     @ApiProperty({
         example: {
             enfermedadesCronicas: ['Migraña crónica', 'Hipertensión', 'Trastorno de ansiedad'],
-            medicacionActual: ['Propranolol 40mg', 'Losartán 50mg', 'Sertralina 50mg'],
-            signosVitales: { presionArterial: '120/80' },
+            medicacionActual: ['Propranolol 40mg c/12hs', 'Losartán 50mg/día', 'Sumatriptán 50mg PRN'],
+            signosVitales: { presionArterial: '128/82' },
         },
     })
     @IsObject()

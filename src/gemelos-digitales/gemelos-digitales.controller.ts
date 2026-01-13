@@ -14,6 +14,12 @@ import { Medico } from '../medicos/entities/medico.entity';
 @ApiBearerAuth()
 export class GemelosDigitalesController {
   constructor(private readonly gemelosService: GemelosDigitalesService) {}
+  
+  @Get('modelos-disponibles')
+  @ApiOperation({ summary: 'Listar modelos de IA disponibles' })
+  listarModelos() {
+    return this.gemelosService.listarModelosDisponibles();
+  }
 
   @Post()
   @ApiOperation({ summary: 'Crear gemelo digital de un paciente' })
@@ -39,6 +45,12 @@ export class GemelosDigitalesController {
     return this.gemelosService.findByPaciente(pacienteId, medico.id);
   }
 
+  @Get(':id/simulaciones')
+  @ApiOperation({ summary: 'Ver historial de simulaciones' })
+  getSimulaciones(@Param('id') id: string, @CurrentUser() medico: Medico) {
+    return this.gemelosService.getSimulaciones(id, medico.id);
+  }
+
   @Post('simular')
   @ApiOperation({ summary: 'Simular tratamiento con IA (ECAMM)' })
   simularTratamiento(@Body() simularDto: SimularTratamientoDto, @CurrentUser() medico: Medico) {
@@ -55,9 +67,4 @@ export class GemelosDigitalesController {
     return this.gemelosService.actualizarDesdeConsulta(id, actualizarDto, medico.id);
   }
 
-  @Get(':id/simulaciones')
-  @ApiOperation({ summary: 'Ver historial de simulaciones' })
-  getSimulaciones(@Param('id') id: string, @CurrentUser() medico: Medico) {
-    return this.gemelosService.getSimulaciones(id, medico.id);
-  }
 }

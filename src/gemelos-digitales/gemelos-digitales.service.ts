@@ -20,6 +20,25 @@ export class GemelosDigitalesService {
     private pacientesRepository: Repository<Paciente>,
   ) {}
 
+  async listarModelosDisponibles() {
+    try {
+      const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+      
+      if (!apiKey) {
+        throw new Error('GOOGLE_GEMINI_API_KEY no está configurada');
+      }
+  
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+      );
+  
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      throw new BadRequestException(`Error: ${error.message}`);
+    }
+  }
+
   // Crear gemelo digital
   async create(createGemeloDto: CreateGemeloDto, medicoId: string) {
     const { pacienteId, perfilMedico } = createGemeloDto;
@@ -86,6 +105,16 @@ export class GemelosDigitalesService {
     return gemelo;
   }
 
+   // Listar simulaciones de un gemelo
+   async getSimulaciones(gemeloId: string, medicoId: string) {
+    const gemelo = await this.findOne(gemeloId, medicoId);
+
+    return await this.simulacionesRepository.find({
+      where: { gemeloDigitalId: gemeloId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   // Simular tratamiento con IA
   async simularTratamiento(simularDto: SimularTratamientoDto, medicoId: string) {
     const { gemeloDigitalId, tratamientoPropuesto, dosisYDuracion } = simularDto;
@@ -107,7 +136,7 @@ export class GemelosDigitalesService {
       prediccionRespuesta: analisisIA.prediccion,
       promptEnviado: prompt,
       respuestaCompletaIA: analisisIA.respuestaCompleta,
-      modeloIAUtilizado: 'gemini-2.0-flash-exp',
+      modeloIAUtilizado: 'gemini-2.5-flash',
     });
 
     return await this.simulacionesRepository.save(simulacion);
@@ -190,7 +219,7 @@ ${dosis ? `\n**DOSIS Y DURACIÓN:**\n${dosis}` : ''}
 IMPORTANTE: Responde ÚNICAMENTE con el JSON, sin texto adicional.`;
   }
 
-  // Llamar a Claude API
+  // Llamar a Gemini API
   private async consultarGeminiIA(prompt: string): Promise<any> {
     try {
       const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
@@ -200,7 +229,7 @@ IMPORTANTE: Responde ÚNICAMENTE con el JSON, sin texto adicional.`;
       }
       
       const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+      const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
   
       const result = await model.generateContent(prompt);
       const respuestaCompleta = result.response.text();
@@ -223,13 +252,4 @@ IMPORTANTE: Responde ÚNICAMENTE con el JSON, sin texto adicional.`;
     }
   }
 
-  // Listar simulaciones de un gemelo
-  async getSimulaciones(gemeloId: string, medicoId: string) {
-    const gemelo = await this.findOne(gemeloId, medicoId);
-
-    return await this.simulacionesRepository.find({
-      where: { gemeloDigitalId: gemeloId },
-      order: { createdAt: 'DESC' },
-    });
-  }
 }
