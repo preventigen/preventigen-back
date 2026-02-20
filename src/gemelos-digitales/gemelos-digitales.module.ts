@@ -10,5 +10,6 @@ import { Paciente } from '../pacientes/entities/paciente.entity';
   imports: [TypeOrmModule.forFeature([GemeloDigital, SimulacionTratamiento, Paciente])],
   controllers: [GemelosDigitalesController],
   providers: [GemelosDigitalesService],
+  exports: [TypeOrmModule],
 })
 export class GemelosDigitalesModule {}
