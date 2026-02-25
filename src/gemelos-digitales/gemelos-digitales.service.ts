@@ -58,10 +58,22 @@ export class GemelosDigitalesService {
       throw new BadRequestException('Ya existe un gemelo digital para este paciente');
     }
 
+    // Combinar datos del paciente con el perfil médico enviado por el médico.
+    // Los datos del paciente sirven como base; lo que manda el médico en perfilMedico
+    // tiene prioridad y sobreescribe en caso de conflicto.
+    const perfilCombinado = {
+      // Datos base del paciente (tabla pacientes)
+      edad: paciente.edad ?? undefined,
+      alergias: paciente.alergias ?? [],
+      enfermedadesCronicas: paciente.enfermedadesCronicas ?? [],
+      // El perfil médico del DTO sobreescribe todo lo anterior si viene definido
+      ...perfilMedico,
+    };
+
     const gemelo = this.gemelosRepository.create({
       pacienteId,
       medicoId,
-      perfilMedico,
+      perfilMedico: perfilCombinado,
       historialActualizaciones: [],
     });
 
