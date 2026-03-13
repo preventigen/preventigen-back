@@ -15,62 +15,53 @@ export class DatosMedicosService {
     private pacientesRepository: Repository<Paciente>,
   ) {}
 
-  async create(createDto: CreateDatoMedicoDto): Promise<DatoMedico> {
+  async create(createDto: CreateDatoMedicoDto, medicoId: string): Promise<DatoMedico> {
     const paciente = await this.pacientesRepository.findOne({
-      where: { id: createDto.pacienteId },
+      where: { id: createDto.pacienteId, medicoId },
     });
+    if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
-    if (!paciente) {
-      throw new NotFoundException('Paciente no encontrado');
-    }
-
-    const dato = this.datosMedicosRepository.create(createDto);
+    const dato = this.datosMedicosRepository.create({ ...createDto, medicoId });
     return await this.datosMedicosRepository.save(dato);
   }
 
-  async findAll(): Promise<DatoMedico[]> {
+  async findAll(medicoId: string): Promise<DatoMedico[]> {
     return await this.datosMedicosRepository.find({
+      where: { medicoId },
       relations: ['paciente'],
       order: { fechaCarga: 'DESC' },
     });
   }
 
-  async findByPaciente(pacienteId: string): Promise<DatoMedico[]> {
+  async findByPaciente(pacienteId: string, medicoId: string): Promise<DatoMedico[]> {
     const paciente = await this.pacientesRepository.findOne({
-      where: { id: pacienteId },
+      where: { id: pacienteId, medicoId },
     });
-
-    if (!paciente) {
-      throw new NotFoundException('Paciente no encontrado');
-    }
+    if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
     return await this.datosMedicosRepository.find({
-      where: { pacienteId },
+      where: { pacienteId, medicoId },
       order: { fechaCarga: 'DESC' },
     });
   }
 
-  async findOne(id: string): Promise<DatoMedico> {
+  async findOne(id: string, medicoId: string): Promise<DatoMedico> {
     const dato = await this.datosMedicosRepository.findOne({
-      where: { id },
+      where: { id, medicoId },
       relations: ['paciente', 'analisis'],
     });
-
-    if (!dato) {
-      throw new NotFoundException(`Dato médico con ID ${id} no encontrado`);
-    }
-
+    if (!dato) throw new NotFoundException(`Dato médico con ID ${id} no encontrado`);
     return dato;
   }
 
-  async update(id: string, updateDto: UpdateDatoMedicoDto): Promise<DatoMedico> {
-    const dato = await this.findOne(id);
+  async update(id: string, updateDto: UpdateDatoMedicoDto, medicoId: string): Promise<DatoMedico> {
+    const dato = await this.findOne(id, medicoId);
     Object.assign(dato, updateDto);
     return await this.datosMedicosRepository.save(dato);
   }
 
-  async remove(id: string): Promise<{ message: string }> {
-    const dato = await this.findOne(id);
+  async remove(id: string, medicoId: string): Promise<{ message: string }> {
+    const dato = await this.findOne(id, medicoId);
     await this.datosMedicosRepository.remove(dato);
     return { message: 'Dato médico eliminado correctamente' };
   }

@@ -38,31 +38,6 @@ import {
     @Column({ name: 'medico_id' })
     medicoId: string;
   
-    @Column('jsonb')
-    perfilMedico: {
-      edad: number;
-      sexo: string;
-      peso?: number;
-      altura?: number;
-      alergias: string[];
-      enfermedadesCronicas: string[];
-      medicacionActual: string[];
-      antecedentesQuirurgicos?: string[];
-      antecedentesFamiliares?: string[];
-      habitosVida?: {
-        tabaquismo?: boolean;
-        alcohol?: boolean;
-        ejercicio?: string;
-        dieta?: string;
-      };
-      signosVitales?: {
-        presionArterial?: string;
-        frecuenciaCardiaca?: number;
-        temperatura?: number;
-        saturacionO2?: number;
-      };
-    };
-  
     @Column('jsonb', { default: [] })
     historialActualizaciones: Array<{
       fecha: Date;

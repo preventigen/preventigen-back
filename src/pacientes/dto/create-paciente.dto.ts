@@ -1,33 +1,48 @@
-import { IsNotEmpty, IsOptional, IsEmail, IsInt, Min, IsArray } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsEnum, IsOptional, IsDateString, IsNotEmpty } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Genero } from '../entities/paciente.entity';
 
 export class CreatePacienteDto {
-    @ApiProperty({ example: 'María García' })
-    @IsNotEmpty()
-    nombre: string;
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  nombre: string;
 
-    @ApiProperty({ example: 35, required: false })
-    @IsOptional()
-    @IsInt()
-    @Min(0)
-    edad?: number;
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
+  apellido: string;
 
-    @ApiProperty({ example: '+54 9 11 1234-5678', required: false })
-    @IsOptional()
-    telefono?: string;
+  @ApiProperty()
+  @IsDateString()
+  fechaNacimiento: string;
 
-    @ApiProperty({ example: 'maria@email.com', required: false })
-    @IsOptional()
-    @IsEmail()
-    email?: string;
+  @ApiProperty({ enum: Genero })
+  @IsEnum(Genero)
+  genero: Genero;
 
-    @ApiProperty({ example: ['Penicilina', 'Maní'], required: false })
-    @IsOptional()
-    @IsArray()
-    alergias?: string[];
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  diagnosticoPrincipal?: string;
 
-    @ApiProperty({ example: ['Diabetes tipo 2', 'Hipertensión'], required: false })
-    @IsOptional()
-    @IsArray()
-    enfermedadesCronicas?: string[];
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  antecedentesMedicos?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  medicacionActual?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  presionArterial?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  comentarios?: string;
 }

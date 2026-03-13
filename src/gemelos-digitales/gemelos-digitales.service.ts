@@ -41,44 +41,26 @@ export class GemelosDigitalesService {
 
   // Crear gemelo digital
   async create(createGemeloDto: CreateGemeloDto, medicoId: string) {
-    const { pacienteId, perfilMedico } = createGemeloDto;
+  const { pacienteId } = createGemeloDto;
 
-    // Verificar que el paciente existe
-    const paciente = await this.pacientesRepository.findOne({ where: { id: pacienteId } });
-    if (!paciente) {
-      throw new NotFoundException('Paciente no encontrado');
-    }
+  const paciente = await this.pacientesRepository.findOne({
+    where: { id: pacienteId, medicoId },
+  });
+  if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
-    // Verificar si ya existe un gemelo para este paciente
-    const gemeloExistente = await this.gemelosRepository.findOne({
-      where: { pacienteId, medicoId },
-    });
+  const gemeloExistente = await this.gemelosRepository.findOne({
+    where: { pacienteId, medicoId },
+  });
+  if (gemeloExistente) throw new BadRequestException('Ya existe un gemelo digital para este paciente');
 
-    if (gemeloExistente) {
-      throw new BadRequestException('Ya existe un gemelo digital para este paciente');
-    }
+  const gemelo = this.gemelosRepository.create({
+    pacienteId,
+    medicoId,
+    historialActualizaciones: [],
+  });
 
-    // Combinar datos del paciente con el perfil médico enviado por el médico.
-    // Los datos del paciente sirven como base; lo que manda el médico en perfilMedico
-    // tiene prioridad y sobreescribe en caso de conflicto.
-    const perfilCombinado = {
-      // Datos base del paciente (tabla pacientes)
-      edad: paciente.edad ?? undefined,
-      alergias: paciente.alergias ?? [],
-      enfermedadesCronicas: paciente.enfermedadesCronicas ?? [],
-      // El perfil médico del DTO sobreescribe todo lo anterior si viene definido
-      ...perfilMedico,
-    };
-
-    const gemelo = this.gemelosRepository.create({
-      pacienteId,
-      medicoId,
-      perfilMedico: perfilCombinado,
-      historialActualizaciones: [],
-    });
-
-    return await this.gemelosRepository.save(gemelo);
-  }
+  return await this.gemelosRepository.save(gemelo);
+}
 
   // Listar gemelos del médico
   async findAll(medicoId: string) {
@@ -155,50 +137,46 @@ export class GemelosDigitalesService {
   }
 
   // Actualizar gemelo con datos de consulta real
-  async actualizarDesdeConsulta(id: string, actualizarDto: ActualizarGemeloDto, medicoId: string) {
-    const gemelo = await this.findOne(id, medicoId);
+async actualizarDesdeConsulta(id: string, actualizarDto: ActualizarGemeloDto, medicoId: string) {
+  const gemelo = await this.findOne(id, medicoId);
 
-    const { consultaId, cambiosRealizados, datosActualizados } = actualizarDto;
+  const { consultaId, cambiosRealizados, datosActualizados } = actualizarDto;
 
-    // Actualizar perfil médico
-    gemelo.perfilMedico = {
-      ...gemelo.perfilMedico,
-      ...datosActualizados,
-    };
+  gemelo.historialActualizaciones.push({
+    fecha: new Date(),
+    consultaId,
+    cambios: cambiosRealizados,
+    datosMedicos: datosActualizados,
+  });
 
-    // Agregar al historial
-    gemelo.historialActualizaciones.push({
-      fecha: new Date(),
-      consultaId,
-      cambios: cambiosRealizados,
-      datosMedicos: datosActualizados,
-    });
+  gemelo.estado = EstadoGemelo.ACTUALIZADO;
 
-    gemelo.estado = EstadoGemelo.ACTUALIZADO;
+  return await this.gemelosRepository.save(gemelo);
+}
 
-    return await this.gemelosRepository.save(gemelo);
-  }
 
-  // Construir prompt ECAMM para Claude
-  private construirPromptECAMM(gemelo: GemeloDigital, tratamiento: string, dosis?: string): string {
-    const perfil = gemelo.perfilMedico;
+private construirPromptECAMM(gemelo: GemeloDigital, tratamiento: string, dosis?: string): string {
+  const paciente = gemelo.paciente;
 
-    return `Eres un médico especialista en medicina de precisión utilizando la técnica ECAMM (Evaluación Clínica Avanzada con Modelos Médicos). 
+  const hoy = new Date();
+  const nacimiento = new Date(paciente.fechaNacimiento);
+  let edad = hoy.getFullYear() - nacimiento.getFullYear();
+  const m = hoy.getMonth() - nacimiento.getMonth();
+  if (m < 0 || (m === 0 && hoy.getDate() < nacimiento.getDate())) edad--;
+
+  return `Eres un médico especialista en medicina de precisión utilizando la técnica ECAMM (Evaluación Clínica Avanzada con Modelos Médicos).
 
 Analiza el siguiente caso clínico y el tratamiento propuesto:
 
-**PERFIL DEL PACIENTE (Gemelo Digital):**
-- Edad: ${perfil.edad} años
-- Sexo: ${perfil.sexo}
-- Peso: ${perfil.peso || 'No especificado'} kg
-- Altura: ${perfil.altura || 'No especificado'} cm
-- Alergias: ${perfil.alergias.join(', ') || 'Ninguna'}
-- Enfermedades crónicas: ${perfil.enfermedadesCronicas.join(', ') || 'Ninguna'}
-- Medicación actual: ${perfil.medicacionActual.join(', ') || 'Ninguna'}
-- Antecedentes quirúrgicos: ${perfil.antecedentesQuirurgicos?.join(', ') || 'Ninguno'}
-- Antecedentes familiares: ${perfil.antecedentesFamiliares?.join(', ') || 'Ninguno'}
-- Hábitos de vida: ${JSON.stringify(perfil.habitosVida || {}, null, 2)}
-- Signos vitales actuales: ${JSON.stringify(perfil.signosVitales || {}, null, 2)}
+**PERFIL DEL PACIENTE:**
+- Nombre: ${paciente.nombre} ${paciente.apellido}
+- Edad: ${edad} años
+- Género: ${paciente.genero}
+- Diagnóstico principal: ${paciente.diagnosticoPrincipal || 'No registrado'}
+- Antecedentes médicos: ${paciente.antecedentesMedicos || 'No registrados'}
+- Medicación actual: ${paciente.medicacionActual || 'Ninguna'}
+- Presión arterial: ${paciente.presionArterial || 'No registrada'}
+- Comentarios: ${paciente.comentarios || 'Ninguno'}
 
 **TRATAMIENTO PROPUESTO:**
 ${tratamiento}
@@ -229,7 +207,7 @@ ${dosis ? `\n**DOSIS Y DURACIÓN:**\n${dosis}` : ''}
 }
 
 IMPORTANTE: Responde ÚNICAMENTE con el JSON, sin texto adicional.`;
-  }
+}
 
   // Llamar a Gemini API
   private async consultarGeminiIA(prompt: string): Promise<any> {

@@ -1,60 +1,44 @@
-import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, CreateDateColumn, UpdateDateColumn, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { Paciente } from '../../pacientes/entities/paciente.entity';
 import { Medico } from '../../medicos/entities/medico.entity';
 
 export enum EstadoConsulta {
-    BORRADOR = 'borrador',
-    CONFIRMADA = 'confirmada',
-    CERRADA = 'cerrada',
+  BORRADOR = 'borrador',
+  CONFIRMADA = 'confirmada',
+  CERRADA = 'cerrada',
 }
 
 @Entity('consultas')
 export class Consulta {
-    @PrimaryGeneratedColumn('uuid')
-    id: string;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-    @ManyToOne(() => Paciente, paciente => paciente.consultas)
-    @JoinColumn({ name: 'paciente_id' })
-    paciente: Paciente;
+  @Column()
+  pacienteId: string;
 
-    @Column({ name: 'paciente_id' })
-    pacienteId: string;
+  @ManyToOne(() => Paciente, paciente => paciente.consultas)
+  @JoinColumn({ name: 'pacienteId' })
+  paciente: Paciente;
 
-    @ManyToOne(() => Medico, medico => medico.consultas)
-    @JoinColumn({ name: 'medico_id' })
-    medico: Medico;
+  @Column()
+  medicoId: string;
 
-    @Column({ name: 'medico_id' })
-    medicoId: string;
+  @ManyToOne(() => Medico, medico => medico.consultas)
+  @JoinColumn({ name: 'medicoId' })
+  medico: Medico;
 
-    @Column('text')
-    motivoConsulta: string;
+  @Column({ type: 'text', nullable: true })
+  detalles: string;
 
-    @Column('text', { nullable: true })
-    antecedentesClave: string;
+  @Column({ type: 'text', nullable: true })
+  tratamientoIndicado: string;
 
-    @Column('text', { nullable: true })
-    medicacionActual: string;
+  @Column({ type: 'enum', enum: EstadoConsulta, default: EstadoConsulta.BORRADOR })
+  estado: EstadoConsulta;
 
-    @Column('text', { array: true, default: [] })
-    alertas: string[];
+  @CreateDateColumn()
+  createdAt: Date;
 
-    @Column('text', { nullable: true })
-    notasMedico: string;
-
-    @Column('text', { nullable: true })
-    recomendacion: string;
-
-    @Column({
-        type: 'enum',
-        enum: EstadoConsulta,
-        default: EstadoConsulta.BORRADOR,
-    })
-    estado: EstadoConsulta;
-
-    @CreateDateColumn()
-    createdAt: Date;
-
-    @UpdateDateColumn()
-    updatedAt: Date;
+  @UpdateDateColumn()
+  updatedAt: Date;
 }

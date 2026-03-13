@@ -13,6 +13,8 @@ import { GemelosDigitalesModule } from './gemelos-digitales/gemelos-digitales.mo
 // Módulos nuevos
 import { DatosMedicosModule } from './datos-medicos/datos-medicos.module';
 import { AnalisisIAModule } from './analisis-ia/analisis-ia.module';
+import { EstudiosMedicosModule } from './estudios-medicos/estudios-medicos.module';
+import { NovedadesClinicasModule } from './novedades-clinicas/novedades-clinicas.module';
 
 @Module({
   imports: [
@@ -29,6 +31,8 @@ import { AnalisisIAModule } from './analisis-ia/analisis-ia.module';
     // Módulos nuevos (PREVENTIGEN simplificado)
     DatosMedicosModule,
     AnalisisIAModule,
+    EstudiosMedicosModule,
+    NovedadesClinicasModule,
   ],
 })
 export class AppModule {}

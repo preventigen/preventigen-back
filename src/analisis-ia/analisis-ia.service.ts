@@ -24,43 +24,33 @@ export class AnalisisIAService {
     private gemelosRepository: Repository<GemeloDigital>,
   ) {}
 
-  /**
-   * Flujo principal unificado:
-   * 1. Toma datos del paciente + datos médicos en texto
-   * 2. Si el paciente tiene GemeloDigital, incorpora su perfilMedico estructurado al prompt
-   * 3. Incluye el contexto de interacciones previas (previo_ia)
-   * 4. Llama a Gemini
-   * 5. Guarda el análisis vinculado al gemelo si existe
-   * 6. Actualiza la memoria (previo_ia) y marca el gemelo como ACTUALIZADO
-   */
-  async analizar(createDto: CreateAnalisisIADto): Promise<AnalisisIA> {
+  async analizar(createDto: CreateAnalisisIADto, medicoId: string): Promise<AnalisisIA> {
     const { pacienteId, datoMedicoId, tipoPrompt, promptUsuario } = createDto;
 
-    // 1. Obtener paciente
-    const paciente = await this.pacientesRepository.findOne({ where: { id: pacienteId } });
+    // 1. Obtener paciente validando que pertenece al médico
+    const paciente = await this.pacientesRepository.findOne({
+      where: { id: pacienteId, medicoId },
+    });
     if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
-    // 2. Obtener datos médicos en texto (todos o uno específico)
+    // 2. Obtener datos médicos (todos o uno específico), validando por medicoId
     let datosMedicos: DatoMedico[] = [];
     if (datoMedicoId) {
       const dato = await this.datosMedicosRepository.findOne({
-        where: { id: datoMedicoId, pacienteId },
+        where: { id: datoMedicoId, pacienteId, medicoId },
       });
       if (!dato) throw new NotFoundException('Dato médico no encontrado o no pertenece al paciente');
       datosMedicos = [dato];
     } else {
       datosMedicos = await this.datosMedicosRepository.find({
-        where: { pacienteId },
+        where: { pacienteId, medicoId },
         order: { fechaCarga: 'ASC' },
       });
     }
 
-    if (datosMedicos.length === 0) {
-      throw new BadRequestException('El paciente no tiene datos médicos cargados para analizar');
-    }
-
+    // Los datos médicos son opcionales — el análisis puede basarse solo en los datos del paciente
     // 3. Buscar el GemeloDigital del paciente (puede no existir)
-    const gemelo = await this.gemelosRepository.findOne({ where: { pacienteId } });
+    const gemelo = await this.gemelosRepository.findOne({ where: { pacienteId, medicoId } });
 
     // 4. Recuperar contexto previo
     const previoIA = await this.previoIARepository.findOne({
@@ -80,7 +70,7 @@ export class AnalisisIAService {
     // 6. Llamar a Gemini
     const { respuesta, resumen } = await this.consultarGemini(promptFinal);
 
-    // 7. Guardar el análisis vinculado al gemelo si existe
+    // 7. Guardar el análisis
     const analisis = this.analisisRepository.create({
       pacienteId,
       datoMedicoId: datoMedicoId ?? undefined,
@@ -95,7 +85,7 @@ export class AnalisisIAService {
     // 8. Actualizar memoria (previo_ia)
     await this.actualizarPrevioIA(pacienteId, resumen, previoIA);
 
-    // 9. Si hay gemelo, marcarlo como ACTUALIZADO (el análisis lo nutrió)
+    // 9. Si hay gemelo, marcarlo como ACTUALIZADO
     if (gemelo) {
       gemelo.estado = EstadoGemelo.ACTUALIZADO;
       await this.gemelosRepository.save(gemelo);
@@ -104,8 +94,10 @@ export class AnalisisIAService {
     return analisisGuardado;
   }
 
-  async findByPaciente(pacienteId: string): Promise<AnalisisIA[]> {
-    const paciente = await this.pacientesRepository.findOne({ where: { id: pacienteId } });
+  async findByPaciente(pacienteId: string, medicoId: string): Promise<AnalisisIA[]> {
+    const paciente = await this.pacientesRepository.findOne({
+      where: { id: pacienteId, medicoId },
+    });
     if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
     return await this.analisisRepository.find({
@@ -115,7 +107,12 @@ export class AnalisisIAService {
     });
   }
 
-  async findUltimo(pacienteId: string): Promise<AnalisisIA> {
+  async findUltimo(pacienteId: string, medicoId: string): Promise<AnalisisIA> {
+    const paciente = await this.pacientesRepository.findOne({
+      where: { id: pacienteId, medicoId },
+    });
+    if (!paciente) throw new NotFoundException('Paciente no encontrado');
+
     const analisis = await this.analisisRepository.findOne({
       where: { pacienteId },
       relations: ['datoMedico', 'gemeloDigital'],
@@ -125,19 +122,26 @@ export class AnalisisIAService {
     return analisis;
   }
 
-  async findContexto(pacienteId: string): Promise<PrevioIA | null> {
+  async findContexto(pacienteId: string, medicoId: string): Promise<PrevioIA | null> {
+    const paciente = await this.pacientesRepository.findOne({
+      where: { id: pacienteId, medicoId },
+    });
+    if (!paciente) throw new NotFoundException('Paciente no encontrado');
+
     return await this.previoIARepository.findOne({
       where: { pacienteId },
       order: { fechaRegistro: 'DESC' },
     });
   }
 
-  async findOne(id: string): Promise<AnalisisIA> {
+  async findOne(id: string, medicoId: string): Promise<AnalisisIA> {
     const analisis = await this.analisisRepository.findOne({
       where: { id },
       relations: ['paciente', 'datoMedico', 'gemeloDigital'],
     });
     if (!analisis) throw new NotFoundException(`Análisis con ID ${id} no encontrado`);
+    // Verificar que el paciente pertenece al médico
+    if (analisis.paciente.medicoId !== medicoId) throw new NotFoundException(`Análisis con ID ${id} no encontrado`);
     return analisis;
   }
 
@@ -150,34 +154,33 @@ export class AnalisisIAService {
     contextoAnterior?: string,
     promptUsuario?: string,
   ): string {
-    // Datos básicos del paciente
+    // Calcular edad desde fechaNacimiento
+    const hoy = new Date();
+    const nacimiento = new Date(paciente.fechaNacimiento);
+    const edad = hoy.getFullYear() - nacimiento.getFullYear();
+
     const datosBasicos = `**DATOS DEL PACIENTE:**
-- Nombre: ${paciente.nombre}
-- Edad: ${paciente.edad || 'No especificada'}
-- Alergias: ${paciente.alergias?.join(', ') || 'Ninguna registrada'}
-- Enfermedades crónicas: ${paciente.enfermedadesCronicas?.join(', ') || 'Ninguna registrada'}`;
+- Nombre: ${paciente.nombre} ${paciente.apellido}
+- Edad: ${edad} años
+- Género: ${paciente.genero}
+- Diagnóstico principal: ${paciente.diagnosticoPrincipal || 'No registrado'}
+- Antecedentes médicos: ${paciente.antecedentesMedicos || 'No registrados'}
+- Medicación actual: ${paciente.medicacionActual || 'Ninguna registrada'}
+- Presión arterial: ${paciente.presionArterial || 'No registrada'}
+- Comentarios: ${paciente.comentarios || 'Ninguno'}`;
 
-    // Si tiene gemelo digital, incorporar su perfil médico estructurado
     const perfilGemelo = gemelo
-      ? `
-**PERFIL MÉDICO ESTRUCTURADO (Gemelo Digital):**
-- Sexo: ${gemelo.perfilMedico.sexo}
-- Peso: ${gemelo.perfilMedico.peso || 'No especificado'} kg
-- Altura: ${gemelo.perfilMedico.altura || 'No especificado'} cm
-- Medicación actual: ${gemelo.perfilMedico.medicacionActual?.join(', ') || 'Ninguna'}
-- Antecedentes quirúrgicos: ${gemelo.perfilMedico.antecedentesQuirurgicos?.join(', ') || 'Ninguno'}
-- Antecedentes familiares: ${gemelo.perfilMedico.antecedentesFamiliares?.join(', ') || 'Ninguno'}
-- Hábitos: tabaquismo=${gemelo.perfilMedico.habitosVida?.tabaquismo ?? 'N/D'}, alcohol=${gemelo.perfilMedico.habitosVida?.alcohol ?? 'N/D'}, ejercicio=${gemelo.perfilMedico.habitosVida?.ejercicio || 'N/D'}
-- Signos vitales: PA=${gemelo.perfilMedico.signosVitales?.presionArterial || 'N/D'}, FC=${gemelo.perfilMedico.signosVitales?.frecuenciaCardiaca || 'N/D'}, SpO2=${gemelo.perfilMedico.signosVitales?.saturacionO2 || 'N/D'}%`
-      : '';
+  ? `\n**GEMELO DIGITAL ACTIVO:** ID ${gemelo.id} — Estado: ${gemelo.estado}`
+  : '';
 
-    // Datos médicos en texto libre
-    const datosTexto = datosMedicos
-      .map(
-        (d, i) =>
-          `[Registro ${i + 1} - ${d.tipo} - ${d.fechaCarga.toLocaleDateString('es-AR')}]\n${d.contenido}`,
-      )
-      .join('\n\n');
+    const datosTexto = datosMedicos.length > 0
+      ? datosMedicos
+          .map(
+            (d, i) =>
+              `[Registro ${i + 1} - ${d.tipo} - ${d.fechaCarga.toLocaleDateString('es-AR')}]\n${d.contenido}`,
+          )
+          .join('\n\n')
+      : 'Sin registros adicionales cargados.';
 
     const contextoSection = contextoAnterior
       ? `\n**CONTEXTO DE INTERACCIONES PREVIAS:**\n${contextoAnterior}\n`
@@ -193,7 +196,7 @@ Analiza la información del siguiente paciente y proporciona un análisis detall
 ${datosBasicos}
 ${perfilGemelo}
 ${contextoSection}
-**INFORMACIÓN MÉDICA (registros en texto):**
+**ANOTACIONES Y DATOS MÉDICOS ADICIONALES:**
 ${datosTexto}
 ${promptSection}
 **INSTRUCCIONES:**

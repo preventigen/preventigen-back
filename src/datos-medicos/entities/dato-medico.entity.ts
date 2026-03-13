@@ -30,6 +30,9 @@ import {
     
         @Column({ name: 'paciente_id' })
         pacienteId: string;
+
+        @Column({ name: 'medico_id' })
+        medicoId: string;
     
         @Column('text')
         contenido: string;
