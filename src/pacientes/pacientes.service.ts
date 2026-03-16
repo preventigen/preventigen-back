@@ -1,24 +1,56 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Paciente } from './entities/paciente.entity';
 import { CreatePacienteDto } from './dto/create-paciente.dto';
 import { UpdatePacienteDto } from './dto/update-paciente.dto';
 import { UpdateDatosMedicosDto } from './dto/update-datos-medicos.dto';
+import { EstudioMedico } from '../estudios-medicos/entities/estudio-medico.entity';
+import { NovedadClinica } from '../novedades-clinicas/entities/novedad-clinica.entity';
 
 @Injectable()
 export class PacientesService {
   constructor(
     @InjectRepository(Paciente)
     private pacientesRepository: Repository<Paciente>,
+    @InjectRepository(EstudioMedico)
+    private estudiosRepository: Repository<EstudioMedico>,
+    @InjectRepository(NovedadClinica)
+    private novedadesRepository: Repository<NovedadClinica>,
   ) {}
 
   async create(createPacienteDto: CreatePacienteDto, medicoId: string): Promise<Paciente> {
-    const paciente = this.pacientesRepository.create({
-      ...createPacienteDto,
-      medicoId,
-    });
-    return await this.pacientesRepository.save(paciente);
+    const { estudios, novedades, ...datosPaciente } = createPacienteDto;
+
+    // 1. Crear y guardar el paciente
+    const paciente = this.pacientesRepository.create({ ...datosPaciente, medicoId });
+    const pacienteGuardado = await this.pacientesRepository.save(paciente);
+
+    // 2. Si vienen estudios, guardarlos asociados al paciente
+    if (estudios && estudios.length > 0) {
+      const estudiosEntidades = estudios.map(e =>
+        this.estudiosRepository.create({ ...e, pacienteId: pacienteGuardado.id }),
+      );
+      await this.estudiosRepository.save(estudiosEntidades);
+    }
+
+    // 3. Si vienen novedades, guardarlas asociadas al paciente
+   if (novedades && novedades.length > 0) {
+    for (const n of novedades) {
+      const novedad = this.novedadesRepository.create({
+        ...n,
+        pacienteId: pacienteGuardado.id,
+        gravedad: n.gravedad as any,
+      });
+      await this.novedadesRepository.save(novedad);
+    }
+  }
+
+    // 4. Devolver el paciente con todo cargado
+    return await this.pacientesRepository.findOne({
+      where: { id: pacienteGuardado.id },
+      relations: ['estudios', 'novedades'],
+    }) ?? pacienteGuardado;
   }
 
   async findAll(medicoId: string): Promise<Paciente[]> {
