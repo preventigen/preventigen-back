@@ -15,6 +15,7 @@ import { DatosMedicosModule } from './datos-medicos/datos-medicos.module';
 import { AnalisisIAModule } from './analisis-ia-general/analisis-ia-general.module';
 import { EstudiosMedicosModule } from './estudios-medicos/estudios-medicos.module';
 import { NovedadesClinicasModule } from './novedades-clinicas/novedades-clinicas.module';
+import { AsistenteMedicoModule } from './asistente-medico/asistente-medico.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { NovedadesClinicasModule } from './novedades-clinicas/novedades-clinicas
     AnalisisIAModule,
     EstudiosMedicosModule,
     NovedadesClinicasModule,
+    AsistenteMedicoModule,
   ],
 })
 export class AppModule {}
