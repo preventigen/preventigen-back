@@ -8,6 +8,7 @@ import { DatoMedico } from '../datos-medicos/entities/dato-medico.entity';
 import { Paciente } from '../pacientes/entities/paciente.entity';
 import { GemeloDigital, EstadoGemelo } from '../gemelos-digitales/entities/gemelo-digital.entity';
 import { CreateAnalisisIADto } from './dto/create-analisis-ia.dto';
+import { Consulta } from '../consultas/entities/consulta.entity';
 
 @Injectable()
 export class AnalisisIAService {
@@ -22,6 +23,8 @@ export class AnalisisIAService {
     private pacientesRepository: Repository<Paciente>,
     @InjectRepository(GemeloDigital)
     private gemelosRepository: Repository<GemeloDigital>,
+    @InjectRepository(Consulta)
+    private consultasRepository: Repository<Consulta>,
   ) {}
 
   async analizar(createDto: CreateAnalisisIADto, medicoId: string): Promise<AnalisisIA> {
@@ -34,7 +37,13 @@ export class AnalisisIAService {
     });
     if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
-    // 2. Obtener datos médicos (anotaciones libres)
+    // 2. Obtener consultas del paciente
+    const consultas = await this.consultasRepository.find({
+      where: { pacienteId, medicoId },
+      order: { createdAt: 'DESC' },
+    });
+
+    // 3. Obtener datos médicos (anotaciones libres)
     let datosMedicos: DatoMedico[] = [];
     if (datoMedicoId) {
       const dato = await this.datosMedicosRepository.findOne({
@@ -49,28 +58,29 @@ export class AnalisisIAService {
       });
     }
 
-    // 3. Buscar el GemeloDigital del paciente (puede no existir)
+    // 4. Buscar el GemeloDigital del paciente (puede no existir)
     const gemelo = await this.gemelosRepository.findOne({ where: { pacienteId, medicoId } });
 
-    // 4. Recuperar contexto previo
+    // 5. Recuperar contexto previo
     const previoIA = await this.previoIARepository.findOne({
       where: { pacienteId },
       order: { fechaRegistro: 'DESC' },
     });
 
-    // 5. Construir prompt
+    // 6. Construir prompt
     const promptFinal = this.construirPrompt(
       paciente,
+      consultas,
       datosMedicos,
       gemelo ?? null,
       previoIA?.registroIA,
       promptUsuario,
     );
 
-    // 6. Llamar a Gemini
+    // 7. Llamar a Gemini
     const { respuesta, resumen } = await this.consultarGemini(promptFinal);
 
-    // 7. Guardar el análisis
+    // 8. Guardar el análisis
     const analisis = this.analisisRepository.create({
       pacienteId,
       datoMedicoId: datoMedicoId ?? undefined,
@@ -82,10 +92,10 @@ export class AnalisisIAService {
     });
     const analisisGuardado: AnalisisIA = await this.analisisRepository.save(analisis);
 
-    // 8. Actualizar memoria (previo_ia)
+    // 9. Actualizar memoria (previo_ia)
     await this.actualizarPrevioIA(pacienteId, resumen, previoIA);
 
-    // 9. Si hay gemelo, marcarlo como ACTUALIZADO
+    // 10. Si hay gemelo, marcarlo como ACTUALIZADO
     if (gemelo) {
       gemelo.estado = EstadoGemelo.ACTUALIZADO;
       await this.gemelosRepository.save(gemelo);
@@ -157,6 +167,7 @@ export class AnalisisIAService {
 
   private construirPrompt(
     paciente: Paciente,
+    consultas: Consulta[],
     datosMedicos: DatoMedico[],
     gemelo: GemeloDigital | null,
     contextoAnterior?: string,
@@ -165,19 +176,17 @@ export class AnalisisIAService {
     const edad = this.calcularEdad(paciente.fechaNacimiento);
     const fechaHoy = new Date().toLocaleDateString('es-AR');
 
-    // ── Perfil del paciente ──────────────────────────────────────────────────
     const perfilPaciente = `**PERFIL DEL PACIENTE:**
 - Nombre: ${paciente.nombre} ${paciente.apellido}
 - Fecha de nacimiento: ${new Date(paciente.fechaNacimiento).toLocaleDateString('es-AR')} (Edad actual al ${fechaHoy}: ${edad} años)
 - Género: ${paciente.genero}
 - Diagnóstico principal: ${paciente.diagnosticoPrincipal || 'No registrado'}
 - Antecedentes médicos: ${paciente.antecedentesMedicos || 'No registrados'}
+- Alergias: ${paciente.alergias || 'Ninguna registrada'}
 - Medicación actual: ${paciente.medicacionActual || 'Ninguna'}
 - Presión arterial: ${paciente.presionArterial || 'No registrada'}
-- Comentarios: ${paciente.comentarios || 'Ninguno'}
-- Alergias: ${paciente.alergias || 'Ninguna registrada'}`;
+- Comentarios: ${paciente.comentarios || 'Ninguno'}`;
 
-    // ── Eventos clínicos / Novedades ─────────────────────────────────────────
     const novedadesTexto = paciente.novedades && paciente.novedades.length > 0
       ? paciente.novedades
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -187,7 +196,6 @@ export class AnalisisIAService {
           .join('\n')
       : 'Sin eventos clínicos registrados.';
 
-    // ── Estudios médicos ─────────────────────────────────────────────────────
     const estudiosTexto = paciente.estudios && paciente.estudios.length > 0
       ? paciente.estudios
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -197,7 +205,14 @@ export class AnalisisIAService {
           .join('\n')
       : 'Sin estudios médicos registrados.';
 
-    // ── Anotaciones libres del médico ────────────────────────────────────────
+    const consultasTexto = consultas && consultas.length > 0
+      ? consultas
+          .map((c, i) =>
+            `${i + 1}. [${new Date(c.createdAt).toLocaleDateString('es-AR')}] Estado: ${c.estado} | Detalles: ${c.detalles || 'N/D'} | Tratamiento indicado: ${c.tratamientoIndicado || 'N/D'}`,
+          )
+          .join('\n')
+      : 'Sin consultas registradas.';
+
     const anotacionesTexto = datosMedicos.length > 0
       ? datosMedicos
           .map((d, i) =>
@@ -206,17 +221,14 @@ export class AnalisisIAService {
           .join('\n')
       : 'Sin anotaciones adicionales.';
 
-    // ── Gemelo digital ───────────────────────────────────────────────────────
     const gemeloTexto = gemelo
       ? `\n**GEMELO DIGITAL ACTIVO:** Estado: ${gemelo.estado}`
       : '';
 
-    // ── Contexto previo ──────────────────────────────────────────────────────
     const contextoTexto = contextoAnterior
       ? `\n**CONTEXTO DE INTERACCIONES PREVIAS:**\n${contextoAnterior}\n`
       : '';
 
-    // ── Consulta del médico (prompt adicional) ───────────────────────────────
     const consultaTexto = promptUsuario
       ? `\n**CONSULTA ESPECÍFICA DEL MÉDICO:**\n${promptUsuario}\n`
       : '';
@@ -250,6 +262,9 @@ ${novedadesTexto}
 **ESTUDIOS MÉDICOS DEL PACIENTE (ordenados del más reciente al más antiguo):**
 ${estudiosTexto}
 
+**HISTORIAL DE CONSULTAS (ordenadas de la más reciente a la más antigua):**
+${consultasTexto}
+
 **ANOTACIONES DEL MÉDICO:**
 ${anotacionesTexto}
 ${contextoTexto}${consultaTexto}
@@ -264,7 +279,7 @@ El objetivo es brindar al médico tratante una visión rápida, clara y estructu
 Debes:
 - Priorizar los eventos clínicos más recientes como indicador del estado actual
 - Detectar patrones relevantes (repetición de síntomas, evolución, empeoramiento/mejoría)
-- Integrar antecedentes, medicación y estudios en un único razonamiento clínico
+- Integrar antecedentes, medicación, consultas previas y estudios en un único razonamiento clínico
 - Señalar inconsistencias o faltantes de información crítica
 - Evitar conclusiones categóricas si la evidencia es insuficiente
 

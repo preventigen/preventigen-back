@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { GemeloDigital, EstadoGemelo } from './entities/gemelo-digital.entity';
 import { SimulacionTratamiento } from './entities/simulacion-tratamiento.entity';
 import { Paciente } from '../pacientes/entities/paciente.entity';
+import { Consulta } from '../consultas/entities/consulta.entity';
 import { CreateGemeloDto } from './dto/create-gemelo.dto';
 import { SimularTratamientoDto } from './dto/simular-tratamiento.dto';
 import { ActualizarGemeloDto } from './dto/actualizar-gemelo.dto';
@@ -18,6 +19,8 @@ export class GemelosDigitalesService {
     private simulacionesRepository: Repository<SimulacionTratamiento>,
     @InjectRepository(Paciente)
     private pacientesRepository: Repository<Paciente>,
+    @InjectRepository(Consulta)
+    private consultasRepository: Repository<Consulta>,
   ) {}
 
   async listarModelosDisponibles() {
@@ -97,10 +100,15 @@ export class GemelosDigitalesService {
     });
     if (!gemelo) throw new NotFoundException('Gemelo digital no encontrado');
 
-    const prompt = this.construirPromptECAMM(gemelo, motivoConsulta, tratamientoPropuesto, dosisYDuracion);
+    // Cargar consultas del paciente
+    const consultas = await this.consultasRepository.find({
+      where: { pacienteId: gemelo.pacienteId, medicoId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const prompt = this.construirPromptECAMM(gemelo, consultas, motivoConsulta, tratamientoPropuesto, dosisYDuracion);
     const analisisIA = await this.consultarGeminiIA(prompt);
 
-    // Detectar si la IA marcó el tratamiento como no recomendado
     const noRecomendado = analisisIA.respuestaCompleta
       .toUpperCase()
       .includes('NO SE RECOMIENDA SEGUIR ESE TRATAMIENTO');
@@ -149,6 +157,7 @@ export class GemelosDigitalesService {
 
   private construirPromptECAMM(
     gemelo: GemeloDigital,
+    consultas: Consulta[],
     motivoConsulta: string,
     tratamiento: string,
     dosis?: string,
@@ -157,7 +166,6 @@ export class GemelosDigitalesService {
     const edad = this.calcularEdad(paciente.fechaNacimiento);
     const fechaHoy = new Date().toLocaleDateString('es-AR');
 
-    // ── Perfil del paciente ──────────────────────────────────────────────────
     const perfilPaciente = `**PERFIL DEL PACIENTE:**
 - Nombre: ${paciente.nombre} ${paciente.apellido}
 - Fecha de nacimiento: ${new Date(paciente.fechaNacimiento).toLocaleDateString('es-AR')} (Edad actual al ${fechaHoy}: ${edad} años)
@@ -169,7 +177,6 @@ export class GemelosDigitalesService {
 - Presión arterial: ${paciente.presionArterial || 'No registrada'}
 - Comentarios: ${paciente.comentarios || 'Ninguno'}`;
 
-    // ── Eventos clínicos ─────────────────────────────────────────────────────
     const novedadesTexto = paciente.novedades && paciente.novedades.length > 0
       ? paciente.novedades
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -179,7 +186,6 @@ export class GemelosDigitalesService {
           .join('\n')
       : 'Sin eventos clínicos registrados.';
 
-    // ── Estudios médicos ─────────────────────────────────────────────────────
     const estudiosTexto = paciente.estudios && paciente.estudios.length > 0
       ? paciente.estudios
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -188,6 +194,14 @@ export class GemelosDigitalesService {
           )
           .join('\n')
       : 'Sin estudios médicos registrados.';
+
+    const consultasTexto = consultas && consultas.length > 0
+      ? consultas
+          .map((c, i) =>
+            `${i + 1}. [${new Date(c.createdAt).toLocaleDateString('es-AR')}] Estado: ${c.estado} | Detalles: ${c.detalles || 'N/D'} | Tratamiento indicado: ${c.tratamientoIndicado || 'N/D'}`,
+          )
+          .join('\n')
+      : 'Sin consultas registradas.';
 
     return `Eres un médico especialista en medicina de precisión, con enfoque en análisis clínico integral utilizando la metodología ECAMM (Evaluación Clínica Avanzada con Modelos Médicos).
 
@@ -216,6 +230,9 @@ ${novedadesTexto}
 
 **ESTUDIOS MÉDICOS DEL PACIENTE (ordenados del más reciente al más antiguo):**
 ${estudiosTexto}
+
+**HISTORIAL DE CONSULTAS (ordenadas de la más reciente a la más antigua):**
+${consultasTexto}
 
 **DATOS DE LA CONSULTA ACTUAL:**
 - Motivo de consulta: ${motivoConsulta}
