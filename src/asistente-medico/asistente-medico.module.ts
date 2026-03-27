@@ -4,9 +4,10 @@ import { AsistenteMedicoController } from './asistente-medico.controller';
 import { AsistenteMedicoService } from './asistente-medico.service';
 import { ConsultaAsistente } from './entities/consulta-asistente.entity';
 import { Paciente } from '../pacientes/entities/paciente.entity';
+import { Consulta } from '../consultas/entities/consulta.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ConsultaAsistente, Paciente])],
+  imports: [TypeOrmModule.forFeature([ConsultaAsistente, Paciente, Consulta])],
   controllers: [AsistenteMedicoController],
   providers: [AsistenteMedicoService],
   exports: [AsistenteMedicoService],

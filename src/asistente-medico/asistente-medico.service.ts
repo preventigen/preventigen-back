@@ -5,6 +5,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ConsultaAsistente } from './entities/consulta-asistente.entity';
 import { CreateConsultaAsistenteDto } from './dto/create-consulta-asistente.dto';
 import { Paciente } from '../pacientes/entities/paciente.entity';
+import { Consulta } from '../consultas/entities/consulta.entity';
 
 @Injectable()
 export class AsistenteMedicoService {
@@ -13,6 +14,8 @@ export class AsistenteMedicoService {
     private consultaAsistenteRepository: Repository<ConsultaAsistente>,
     @InjectRepository(Paciente)
     private pacientesRepository: Repository<Paciente>,
+    @InjectRepository(Consulta)
+    private consultasRepository: Repository<Consulta>,
   ) {}
 
   async consultar(dto: CreateConsultaAsistenteDto, medicoId: string): Promise<ConsultaAsistente> {
@@ -25,7 +28,13 @@ export class AsistenteMedicoService {
     });
     if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
-    const prompt = this.construirPrompt(paciente, consultaMedico);
+    // Cargar consultas del paciente
+    const consultas = await this.consultasRepository.find({
+      where: { pacienteId, medicoId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const prompt = this.construirPrompt(paciente, consultas, consultaMedico);
     const respuesta = await this.consultarGemini(prompt);
 
     const consulta = this.consultaAsistenteRepository.create({
@@ -72,7 +81,11 @@ export class AsistenteMedicoService {
     return edad;
   }
 
-  private construirPrompt(paciente: Paciente, consultaMedico: string): string {
+  private construirPrompt(
+    paciente: Paciente,
+    consultas: Consulta[],
+    consultaMedico: string,
+  ): string {
     const edad = this.calcularEdad(paciente.fechaNacimiento);
     const fechaHoy = new Date().toLocaleDateString('es-AR');
 
@@ -105,6 +118,14 @@ export class AsistenteMedicoService {
           .join('\n')
       : 'Sin estudios médicos registrados.';
 
+    const consultasTexto = consultas && consultas.length > 0
+      ? consultas
+          .map((c, i) =>
+            `${i + 1}. [${new Date(c.createdAt).toLocaleDateString('es-AR')}] Estado: ${c.estado} | Detalles: ${c.detalles || 'N/D'} | Tratamiento indicado: ${c.tratamientoIndicado || 'N/D'}`,
+          )
+          .join('\n')
+      : 'Sin consultas registradas.';
+
     return `Eres un médico especialista en medicina de precisión, con enfoque en análisis clínico integral utilizando la metodología ECAMM (Evaluación Clínica Avanzada con Modelos Médicos).
 
 Tu rol no es reemplazar al médico tratante, sino asistir en la interpretación clínica avanzada, identificando patrones, relaciones entre variables y posibles riesgos, en base a la información disponible.
@@ -132,6 +153,9 @@ ${novedadesTexto}
 
 **ESTUDIOS MÉDICOS DEL PACIENTE (ordenados del más reciente al más antiguo):**
 ${estudiosTexto}
+
+**HISTORIAL DE CONSULTAS (ordenadas de la más reciente a la más antigua):**
+${consultasTexto}
 
 **CONSULTA DEL MÉDICO TRATANTE:**
 ${consultaMedico}
