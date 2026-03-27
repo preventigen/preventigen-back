@@ -27,13 +27,14 @@ export class AnalisisIAService {
   async analizar(createDto: CreateAnalisisIADto, medicoId: string): Promise<AnalisisIA> {
     const { pacienteId, datoMedicoId, tipoPrompt, promptUsuario } = createDto;
 
-    // 1. Obtener paciente validando que pertenece al médico
+    // 1. Obtener paciente con sus relaciones
     const paciente = await this.pacientesRepository.findOne({
       where: { id: pacienteId, medicoId },
+      relations: ['novedades', 'estudios'],
     });
     if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
-    // 2. Obtener datos médicos (todos o uno específico), validando por medicoId
+    // 2. Obtener datos médicos (anotaciones libres)
     let datosMedicos: DatoMedico[] = [];
     if (datoMedicoId) {
       const dato = await this.datosMedicosRepository.findOne({
@@ -48,7 +49,6 @@ export class AnalisisIAService {
       });
     }
 
-    // Los datos médicos son opcionales — el análisis puede basarse solo en los datos del paciente
     // 3. Buscar el GemeloDigital del paciente (puede no existir)
     const gemelo = await this.gemelosRepository.findOne({ where: { pacienteId, medicoId } });
 
@@ -58,7 +58,7 @@ export class AnalisisIAService {
       order: { fechaRegistro: 'DESC' },
     });
 
-    // 5. Construir prompt unificado
+    // 5. Construir prompt
     const promptFinal = this.construirPrompt(
       paciente,
       datosMedicos,
@@ -140,12 +140,20 @@ export class AnalisisIAService {
       relations: ['paciente', 'datoMedico', 'gemeloDigital'],
     });
     if (!analisis) throw new NotFoundException(`Análisis con ID ${id} no encontrado`);
-    // Verificar que el paciente pertenece al médico
     if (analisis.paciente.medicoId !== medicoId) throw new NotFoundException(`Análisis con ID ${id} no encontrado`);
     return analisis;
   }
 
   // ─── Privados ────────────────────────────────────────────────────────────────
+
+  private calcularEdad(fechaNacimiento: Date): number {
+    const hoy = new Date();
+    const nacimiento = new Date(fechaNacimiento);
+    let edad = hoy.getFullYear() - nacimiento.getFullYear();
+    const m = hoy.getMonth() - nacimiento.getMonth();
+    if (m < 0 || (m === 0 && hoy.getDate() < nacimiento.getDate())) edad--;
+    return edad;
+  }
 
   private construirPrompt(
     paciente: Paciente,
@@ -154,56 +162,119 @@ export class AnalisisIAService {
     contextoAnterior?: string,
     promptUsuario?: string,
   ): string {
-    // Calcular edad desde fechaNacimiento
-    const hoy = new Date();
-    const nacimiento = new Date(paciente.fechaNacimiento);
-    const edad = hoy.getFullYear() - nacimiento.getFullYear();
+    const edad = this.calcularEdad(paciente.fechaNacimiento);
+    const fechaHoy = new Date().toLocaleDateString('es-AR');
 
-    const datosBasicos = `**DATOS DEL PACIENTE:**
+    // ── Perfil del paciente ──────────────────────────────────────────────────
+    const perfilPaciente = `**PERFIL DEL PACIENTE:**
 - Nombre: ${paciente.nombre} ${paciente.apellido}
-- Edad: ${edad} años
+- Fecha de nacimiento: ${new Date(paciente.fechaNacimiento).toLocaleDateString('es-AR')} (Edad actual al ${fechaHoy}: ${edad} años)
 - Género: ${paciente.genero}
 - Diagnóstico principal: ${paciente.diagnosticoPrincipal || 'No registrado'}
 - Antecedentes médicos: ${paciente.antecedentesMedicos || 'No registrados'}
-- Medicación actual: ${paciente.medicacionActual || 'Ninguna registrada'}
+- Medicación actual: ${paciente.medicacionActual || 'Ninguna'}
 - Presión arterial: ${paciente.presionArterial || 'No registrada'}
-- Comentarios: ${paciente.comentarios || 'Ninguno'}`;
+- Comentarios: ${paciente.comentarios || 'Ninguno'}
+- Alergias: ${paciente.alergias || 'Ninguna registrada'}`;
 
-    const perfilGemelo = gemelo
-  ? `\n**GEMELO DIGITAL ACTIVO:** ID ${gemelo.id} — Estado: ${gemelo.estado}`
-  : '';
-
-    const datosTexto = datosMedicos.length > 0
-      ? datosMedicos
-          .map(
-            (d, i) =>
-              `[Registro ${i + 1} - ${d.tipo} - ${d.fechaCarga.toLocaleDateString('es-AR')}]\n${d.contenido}`,
+    // ── Eventos clínicos / Novedades ─────────────────────────────────────────
+    const novedadesTexto = paciente.novedades && paciente.novedades.length > 0
+      ? paciente.novedades
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .map((n, i) =>
+            `${i + 1}. [${new Date(n.createdAt).toLocaleDateString('es-AR')}] Tipo: ${n.tipoEvento || 'N/D'} | Descripción: ${n.descripcion || 'N/D'} | Zona afectada: ${n.zonaAfectada || 'N/D'} | Gravedad: ${n.gravedad || 'N/D'} | Observaciones: ${n.observaciones || 'N/D'}`,
           )
-          .join('\n\n')
-      : 'Sin registros adicionales cargados.';
+          .join('\n')
+      : 'Sin eventos clínicos registrados.';
 
-    const contextoSection = contextoAnterior
+    // ── Estudios médicos ─────────────────────────────────────────────────────
+    const estudiosTexto = paciente.estudios && paciente.estudios.length > 0
+      ? paciente.estudios
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .map((e, i) =>
+            `${i + 1}. [${e.fecha ? new Date(e.fecha).toLocaleDateString('es-AR') : 'Sin fecha'}] Estudio: ${e.nombreEstudio} | Observaciones: ${e.observaciones || 'N/D'}`,
+          )
+          .join('\n')
+      : 'Sin estudios médicos registrados.';
+
+    // ── Anotaciones libres del médico ────────────────────────────────────────
+    const anotacionesTexto = datosMedicos.length > 0
+      ? datosMedicos
+          .map((d, i) =>
+            `${i + 1}. [${d.fechaCarga.toLocaleDateString('es-AR')}] Tipo: ${d.tipo} | ${d.contenido}`,
+          )
+          .join('\n')
+      : 'Sin anotaciones adicionales.';
+
+    // ── Gemelo digital ───────────────────────────────────────────────────────
+    const gemeloTexto = gemelo
+      ? `\n**GEMELO DIGITAL ACTIVO:** Estado: ${gemelo.estado}`
+      : '';
+
+    // ── Contexto previo ──────────────────────────────────────────────────────
+    const contextoTexto = contextoAnterior
       ? `\n**CONTEXTO DE INTERACCIONES PREVIAS:**\n${contextoAnterior}\n`
       : '';
 
-    const promptSection = promptUsuario
-      ? `\n**CONSULTA DEL MÉDICO:**\n${promptUsuario}\n`
+    // ── Consulta del médico (prompt adicional) ───────────────────────────────
+    const consultaTexto = promptUsuario
+      ? `\n**CONSULTA ESPECÍFICA DEL MÉDICO:**\n${promptUsuario}\n`
       : '';
 
-    return `Eres un asistente médico especializado en análisis clínico preventivo.
-Analiza la información del siguiente paciente y proporciona un análisis detallado.
+    return `Eres un médico especialista en medicina de precisión, con enfoque en análisis clínico integral utilizando la metodología ECAMM (Evaluación Clínica Avanzada con Modelos Médicos).
+Tu rol no es reemplazar al médico tratante, sino asistir en la interpretación clínica avanzada, identificando patrones, relaciones entre variables y posibles riesgos, en base a la información disponible.
+Vas a trabajar sobre un "Gemelo Digital del Paciente", que representa una reconstrucción estructurada de su estado de salud a partir de datos personales, antecedentes, eventos clínicos y estudios médicos.
 
-${datosBasicos}
-${perfilGemelo}
-${contextoSection}
-**ANOTACIONES Y DATOS MÉDICOS ADICIONALES:**
-${datosTexto}
-${promptSection}
-**INSTRUCCIONES:**
-1. Análisis clínico integral considerando TODA la información disponible.
-2. Observaciones relevantes y posibles áreas de atención.
-3. Recomendaciones preventivas o de seguimiento.
-4. Si hay alertas o datos que requieran atención urgente, menciónalos claramente.
+Debes considerar que:
+- La información puede ser incompleta, heterogénea o contener omisiones.
+- No todos los datos tienen el mismo peso clínico.
+- Es fundamental priorizar el contexto general del paciente por sobre datos aislados.
+- Los eventos clínicos y estudios deben analizarse en forma longitudinal (evolución en el tiempo).
+- Debes identificar inconsistencias, vacíos de información relevantes y posibles riesgos clínicos.
+
+En tu análisis:
+- Integra toda la información disponible antes de emitir conclusiones.
+- Evita suposiciones no fundamentadas.
+- Señala cuando la información es insuficiente para una conclusión sólida.
+- Prioriza criterios médicos basados en evidencia y razonamiento clínico.
+- Si detectas datos críticos (riesgo alto, urgencia, contradicciones relevantes), debes destacarlo explícitamente.
+
+A continuación se presenta el Gemelo Digital del Paciente para su análisis:
+${gemeloTexto}
+
+${perfilPaciente}
+
+**EVENTOS CLÍNICOS DEL PACIENTE (ordenados del más reciente al más antiguo):**
+${novedadesTexto}
+
+**ESTUDIOS MÉDICOS DEL PACIENTE (ordenados del más reciente al más antiguo):**
+${estudiosTexto}
+
+**ANOTACIONES DEL MÉDICO:**
+${anotacionesTexto}
+${contextoTexto}${consultaTexto}
+**INSTRUCCIÓN DE ANÁLISIS GENERAL:**
+Realiza un análisis clínico integral del paciente a partir del Gemelo Digital provisto.
+El objetivo es brindar al médico tratante una visión rápida, clara y estructurada del estado general del paciente, priorizando:
+- Diagnóstico presuntivo (si corresponde)
+- Estado clínico actual
+- Evolución reciente (especialmente últimos eventos clínicos y estudios)
+- Identificación de riesgos actuales y potenciales
+
+Debes:
+- Priorizar los eventos clínicos más recientes como indicador del estado actual
+- Detectar patrones relevantes (repetición de síntomas, evolución, empeoramiento/mejoría)
+- Integrar antecedentes, medicación y estudios en un único razonamiento clínico
+- Señalar inconsistencias o faltantes de información crítica
+- Evitar conclusiones categóricas si la evidencia es insuficiente
+
+**FORMATO DE RESPUESTA (texto estructurado, NO JSON):**
+1. Resumen clínico:
+2. Diagnóstico presuntivo:
+3. Estado actual:
+4. Evolución reciente:
+5. Alertas clínicas:
+6. Observaciones adicionales:
 
 Al final, incluye una sección titulada exactamente "RESUMEN_CONTEXTO:" seguida de un resumen en no más de 200 caracteres de los puntos clave de esta interacción.`;
   }

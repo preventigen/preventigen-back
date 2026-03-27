@@ -91,6 +91,11 @@ export class CreatePacienteDto {
   @IsString()
   comentarios?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  alergias?: string;
+
   @ApiPropertyOptional({ type: [CreateEstudioEnPacienteDto] })
   @IsOptional()
   @IsArray()

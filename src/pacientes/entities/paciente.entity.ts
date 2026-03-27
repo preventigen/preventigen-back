@@ -3,8 +3,8 @@ import { Medico } from '../../medicos/entities/medico.entity';
 import { Consulta } from '../../consultas/entities/consulta.entity';
 import { EstudioMedico } from '../../estudios-medicos/entities/estudio-medico.entity';
 import { NovedadClinica } from '../../novedades-clinicas/entities/novedad-clinica.entity';
-import { AnalisisIA } from '../../analisis-ia/entities/analisis-ia.entity';
-import { PrevioIA } from '../../analisis-ia/entities/previo-ia.entity';
+import { AnalisisIA } from '../../analisis-ia-general/entities/analisis-ia.entity';
+import { PrevioIA } from '../../analisis-ia-general/entities/previo-ia.entity';
 import { DatoMedico } from '../../datos-medicos/entities/dato-medico.entity';
 
 export enum Genero {
@@ -52,6 +52,9 @@ export class Paciente {
 
   @Column({ nullable: true })
   comentarios: string;
+
+  @Column({ nullable: true })
+  alergias: string;
 
   @OneToMany(() => Consulta, consulta => consulta.paciente)
   consultas: Consulta[];

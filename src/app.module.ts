@@ -12,7 +12,7 @@ import { GemelosDigitalesModule } from './gemelos-digitales/gemelos-digitales.mo
 
 // Módulos nuevos
 import { DatosMedicosModule } from './datos-medicos/datos-medicos.module';
-import { AnalisisIAModule } from './analisis-ia/analisis-ia.module';
+import { AnalisisIAModule } from './analisis-ia-general/analisis-ia-general.module';
 import { EstudiosMedicosModule } from './estudios-medicos/estudios-medicos.module';
 import { NovedadesClinicasModule } from './novedades-clinicas/novedades-clinicas.module';
 

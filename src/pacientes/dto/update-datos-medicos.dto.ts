@@ -26,4 +26,9 @@ export class UpdateDatosMedicosDto {
   @IsOptional()
   @IsString()
   comentarios?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  alergias?: string;
 }

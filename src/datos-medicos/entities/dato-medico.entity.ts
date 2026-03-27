@@ -8,7 +8,7 @@ import {
     JoinColumn,
   } from 'typeorm';
   import { Paciente } from '../../pacientes/entities/paciente.entity';
-  import { AnalisisIA } from '../../analisis-ia/entities/analisis-ia.entity';
+  import { AnalisisIA } from '../../analisis-ia-general/entities/analisis-ia.entity';
   
   export enum TipoDatoMedico {
     ANTECEDENTE = 'antecedente',

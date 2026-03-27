@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AnalisisIAService } from './analisis-ia.service';
-import { AnalisisIAController } from './analisis-ia.controller';
+import { AnalisisIAService } from './analisis-ia-general.service';
+import { AnalisisIAController } from './analisis-ia-general.controller';
 import { AnalisisIA } from './entities/analisis-ia.entity';
 import { PrevioIA } from './entities/previo-ia.entity';
 import { DatoMedico } from '../datos-medicos/entities/dato-medico.entity';

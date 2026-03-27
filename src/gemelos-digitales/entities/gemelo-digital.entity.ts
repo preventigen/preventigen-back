@@ -11,7 +11,7 @@ import {
   import { Paciente } from '../../pacientes/entities/paciente.entity';
   import { Medico } from '../../medicos/entities/medico.entity';
   import { SimulacionTratamiento } from './simulacion-tratamiento.entity';
-  import { AnalisisIA } from '../../analisis-ia/entities/analisis-ia.entity';
+  import { AnalisisIA } from '../../analisis-ia-general/entities/analisis-ia.entity';
   
   export enum EstadoGemelo {
     ACTIVO = 'activo',

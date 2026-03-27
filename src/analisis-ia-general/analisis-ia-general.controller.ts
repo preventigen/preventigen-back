@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Body, Param, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { AnalisisIAService } from './analisis-ia.service';
+import { AnalisisIAService } from './analisis-ia-general.service';
 import { CreateAnalisisIADto } from './dto/create-analisis-ia.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
