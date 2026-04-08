@@ -5,6 +5,7 @@ import { GemeloDigital, EstadoGemelo } from './entities/gemelo-digital.entity';
 import { SimulacionTratamiento } from './entities/simulacion-tratamiento.entity';
 import { Paciente } from '../pacientes/entities/paciente.entity';
 import { Consulta } from '../consultas/entities/consulta.entity';
+import { ContextoIA } from '../analisis-ia-general/entities/contexto-ia.entity';
 import { CreateGemeloDto } from './dto/create-gemelo.dto';
 import { SimularTratamientoDto } from './dto/simular-tratamiento.dto';
 import { ActualizarGemeloDto } from './dto/actualizar-gemelo.dto';
@@ -21,6 +22,8 @@ export class GemelosDigitalesService {
     private pacientesRepository: Repository<Paciente>,
     @InjectRepository(Consulta)
     private consultasRepository: Repository<Consulta>,
+    @InjectRepository(ContextoIA)
+    private contextoIARepository: Repository<ContextoIA>,
   ) {}
 
   async listarModelosDisponibles() {
@@ -36,23 +39,13 @@ export class GemelosDigitalesService {
 
   async create(createGemeloDto: CreateGemeloDto, medicoId: string) {
     const { pacienteId } = createGemeloDto;
-
-    const paciente = await this.pacientesRepository.findOne({
-      where: { id: pacienteId, medicoId },
-    });
+    const paciente = await this.pacientesRepository.findOne({ where: { id: pacienteId, medicoId } });
     if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
-    const gemeloExistente = await this.gemelosRepository.findOne({
-      where: { pacienteId, medicoId },
-    });
+    const gemeloExistente = await this.gemelosRepository.findOne({ where: { pacienteId, medicoId } });
     if (gemeloExistente) throw new BadRequestException('Ya existe un gemelo digital para este paciente');
 
-    const gemelo = this.gemelosRepository.create({
-      pacienteId,
-      medicoId,
-      historialActualizaciones: [],
-    });
-
+    const gemelo = this.gemelosRepository.create({ pacienteId, medicoId, historialActualizaciones: [] });
     return await this.gemelosRepository.save(gemelo);
   }
 
@@ -93,20 +86,26 @@ export class GemelosDigitalesService {
   async simularTratamiento(simularDto: SimularTratamientoDto, medicoId: string) {
     const { gemeloDigitalId, motivoConsulta, tratamientoPropuesto, dosisYDuracion } = simularDto;
 
-    // Cargar gemelo con paciente y sus relaciones clínicas
     const gemelo = await this.gemelosRepository.findOne({
       where: { id: gemeloDigitalId, medicoId },
       relations: ['paciente', 'paciente.novedades', 'paciente.estudios'],
     });
     if (!gemelo) throw new NotFoundException('Gemelo digital no encontrado');
 
-    // Cargar consultas del paciente
     const consultas = await this.consultasRepository.find({
       where: { pacienteId: gemelo.pacienteId, medicoId },
       order: { createdAt: 'DESC' },
     });
 
-    const prompt = this.construirPromptECAMM(gemelo, consultas, motivoConsulta, tratamientoPropuesto, dosisYDuracion);
+    // Cargar contexto IA del paciente
+    const contextoIA = await this.contextoIARepository.findOne({
+      where: { pacienteId: gemelo.pacienteId },
+      order: { ultimaActualizacion: 'DESC' },
+    });
+
+    const prompt = this.construirPromptECAMM(
+      gemelo, consultas, contextoIA?.contenidoContexto, motivoConsulta, tratamientoPropuesto, dosisYDuracion,
+    );
     const analisisIA = await this.consultarGeminiIA(prompt);
 
     const noRecomendado = analisisIA.respuestaCompleta
@@ -144,8 +143,6 @@ export class GemelosDigitalesService {
     return await this.gemelosRepository.save(gemelo);
   }
 
-  // ─── Privados ────────────────────────────────────────────────────────────────
-
   private calcularEdad(fechaNacimiento: Date): number {
     const hoy = new Date();
     const nacimiento = new Date(fechaNacimiento);
@@ -158,6 +155,7 @@ export class GemelosDigitalesService {
   private construirPromptECAMM(
     gemelo: GemeloDigital,
     consultas: Consulta[],
+    contextoAnterior: string | undefined,
     motivoConsulta: string,
     tratamiento: string,
     dosis?: string,
@@ -203,6 +201,10 @@ export class GemelosDigitalesService {
           .join('\n')
       : 'Sin consultas registradas.';
 
+    const contextoTexto = contextoAnterior
+      ? `\n**CONTEXTO_IA (resumen clínico previo del paciente):**\n[CONTEXTO_IA]\n${contextoAnterior}\n[/CONTEXTO_IA]\n`
+      : '\n**CONTEXTO_IA:** No existe contexto previo para este paciente.\n';
+
     return `Eres un médico especialista en medicina de precisión, con enfoque en análisis clínico integral utilizando la metodología ECAMM (Evaluación Clínica Avanzada con Modelos Médicos).
 
 Tu rol no es reemplazar al médico tratante, sino asistir en la interpretación clínica avanzada, identificando patrones, relaciones entre variables y posibles riesgos, en base a la información disponible.
@@ -224,6 +226,8 @@ En tu análisis:
 - Si detectas datos críticos (riesgo alto, urgencia, contradicciones relevantes), debes destacarlo explícitamente.
 
 ${perfilPaciente}
+
+${contextoTexto}
 
 **EVENTOS CLÍNICOS DEL PACIENTE (ordenados del más reciente al más antiguo):**
 ${novedadesTexto}
@@ -306,11 +310,7 @@ Si la información es insuficiente, indícalo explícitamente.
 
       const resultado = JSON.parse(jsonMatch[0]);
 
-      return {
-        analisis: resultado.analisis,
-        prediccion: resultado.prediccion,
-        respuestaCompleta,
-      };
+      return { analisis: resultado.analisis, prediccion: resultado.prediccion, respuestaCompleta };
     } catch (error) {
       throw new BadRequestException(`Error al consultar IA: ${error.message}`);
     }

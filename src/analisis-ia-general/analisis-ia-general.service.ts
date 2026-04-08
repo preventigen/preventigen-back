@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { AnalisisIA, TipoPrompt } from './entities/analisis-ia.entity';
-import { PrevioIA } from './entities/previo-ia.entity';
+import { ContextoIA, TipoContexto } from './entities/contexto-ia.entity';
 import { DatoMedico } from '../datos-medicos/entities/dato-medico.entity';
 import { Paciente } from '../pacientes/entities/paciente.entity';
 import { GemeloDigital, EstadoGemelo } from '../gemelos-digitales/entities/gemelo-digital.entity';
@@ -15,8 +15,8 @@ export class AnalisisIAService {
   constructor(
     @InjectRepository(AnalisisIA)
     private analisisRepository: Repository<AnalisisIA>,
-    @InjectRepository(PrevioIA)
-    private previoIARepository: Repository<PrevioIA>,
+    @InjectRepository(ContextoIA)
+    private contextoIARepository: Repository<ContextoIA>,
     @InjectRepository(DatoMedico)
     private datosMedicosRepository: Repository<DatoMedico>,
     @InjectRepository(Paciente)
@@ -58,13 +58,13 @@ export class AnalisisIAService {
       });
     }
 
-    // 4. Buscar el GemeloDigital del paciente (puede no existir)
+    // 4. Buscar el GemeloDigital del paciente
     const gemelo = await this.gemelosRepository.findOne({ where: { pacienteId, medicoId } });
 
-    // 5. Recuperar contexto previo
-    const previoIA = await this.previoIARepository.findOne({
+    // 5. Recuperar contexto IA previo
+    const contextoExistente = await this.contextoIARepository.findOne({
       where: { pacienteId },
-      order: { fechaRegistro: 'DESC' },
+      order: { ultimaActualizacion: 'DESC' },
     });
 
     // 6. Construir prompt
@@ -73,12 +73,12 @@ export class AnalisisIAService {
       consultas,
       datosMedicos,
       gemelo ?? null,
-      previoIA?.registroIA,
+      contextoExistente?.contenidoContexto,
       promptUsuario,
     );
 
     // 7. Llamar a Gemini
-    const { respuesta, resumen } = await this.consultarGemini(promptFinal);
+    const { respuesta, contextoGenerado } = await this.consultarGemini(promptFinal);
 
     // 8. Guardar el análisis
     const analisis = this.analisisRepository.create({
@@ -88,12 +88,12 @@ export class AnalisisIAService {
       tipoPrompt: tipoPrompt || TipoPrompt.USUARIO,
       prompt: promptFinal,
       respuestaIA: respuesta,
-      resumenContexto: resumen,
+      resumenContexto: contextoGenerado,
     });
-    const analisisGuardado: AnalisisIA = await this.analisisRepository.save(analisis);
+    const analisisGuardado = await this.analisisRepository.save(analisis);
 
-    // 9. Actualizar memoria (previo_ia)
-    await this.actualizarPrevioIA(pacienteId, resumen, previoIA);
+    // 9. Actualizar contexto IA
+    await this.actualizarContextoIA(pacienteId, contextoGenerado, contextoExistente);
 
     // 10. Si hay gemelo, marcarlo como ACTUALIZADO
     if (gemelo) {
@@ -132,15 +132,15 @@ export class AnalisisIAService {
     return analisis;
   }
 
-  async findContexto(pacienteId: string, medicoId: string): Promise<PrevioIA | null> {
+  async findContexto(pacienteId: string, medicoId: string): Promise<ContextoIA | null> {
     const paciente = await this.pacientesRepository.findOne({
       where: { id: pacienteId, medicoId },
     });
     if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
-    return await this.previoIARepository.findOne({
+    return await this.contextoIARepository.findOne({
       where: { pacienteId },
-      order: { fechaRegistro: 'DESC' },
+      order: { ultimaActualizacion: 'DESC' },
     });
   }
 
@@ -226,8 +226,8 @@ export class AnalisisIAService {
       : '';
 
     const contextoTexto = contextoAnterior
-      ? `\n**CONTEXTO DE INTERACCIONES PREVIAS:**\n${contextoAnterior}\n`
-      : '';
+      ? `\n**CONTEXTO_IA (resumen clínico previo del paciente):**\n[CONTEXTO_IA]\n${contextoAnterior}\n[/CONTEXTO_IA]\n`
+      : '\n**CONTEXTO_IA:** No existe contexto previo para este paciente.\n';
 
     const consultaTexto = promptUsuario
       ? `\n**CONSULTA ESPECÍFICA DEL MÉDICO:**\n${promptUsuario}\n`
@@ -256,6 +256,8 @@ ${gemeloTexto}
 
 ${perfilPaciente}
 
+${contextoTexto}
+
 **EVENTOS CLÍNICOS DEL PACIENTE (ordenados del más reciente al más antiguo):**
 ${novedadesTexto}
 
@@ -267,7 +269,7 @@ ${consultasTexto}
 
 **ANOTACIONES DEL MÉDICO:**
 ${anotacionesTexto}
-${contextoTexto}${consultaTexto}
+${consultaTexto}
 **INSTRUCCIÓN DE ANÁLISIS GENERAL:**
 Realiza un análisis clínico integral del paciente a partir del Gemelo Digital provisto.
 El objetivo es brindar al médico tratante una visión rápida, clara y estructurada del estado general del paciente, priorizando:
@@ -291,10 +293,54 @@ Debes:
 5. Alertas clínicas:
 6. Observaciones adicionales:
 
-Al final, incluye una sección titulada exactamente "RESUMEN_CONTEXTO:" seguida de un resumen en no más de 200 caracteres de los puntos clave de esta interacción.`;
+---
+
+**GENERACIÓN Y ACTUALIZACIÓN DE CONTEXTO_IA:**
+
+Además del análisis anterior, debes generar o actualizar el CONTEXTO_IA del paciente.
+Este contexto será reutilizado en futuras consultas para mantener coherencia clínica.
+
+Antes de generarlo, analiza el CONTEXTO_IA previo (si existe) y compáralo con la información actual.
+
+Aplica estas reglas:
+
+1) Si el nuevo contexto es sustancialmente idéntico al anterior:
+[CONTEXTO_IA]
+SIN_CAMBIOS_RELEVANTES
+[/CONTEXTO_IA]
+
+2) Si hay información nueva o cambios parciales:
+[CONTEXTO_IA]
+ACTUALIZACION:
+Texto breve con la nueva información relevante o cambios detectados.
+[/CONTEXTO_IA]
+
+3) Si el estado clínico cambió significativamente o es la primera vez:
+[CONTEXTO_IA]
+Texto completo en uno o dos párrafos con:
+- Estado actual
+- Problemas principales
+- Diagnóstico presuntivo (si aplica)
+- Riesgos
+- Eventos recientes
+- Medicación relevante
+- Alertas
+[/CONTEXTO_IA]
+
+CRITERIOS DE EVALUACIÓN para determinar si hay cambios:
+- Cambios en diagnóstico
+- Nuevos síntomas o eventos clínicos
+- Cambios en medicación
+- Aparición de riesgos o alertas
+- Evolución clínica relevante
+
+IMPORTANTE:
+- No contradecir el CONTEXTO_IA previo sin explicar el cambio clínico
+- No incluir información irrelevante
+- Priorizar claridad y utilidad clínica`;
   }
 
-  private async consultarGemini(prompt: string): Promise<{ respuesta: string; resumen: string }> {
+  private async consultarGemini(prompt: string): Promise<{ respuesta: string; contextoGenerado: string }> {
     const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
     if (!apiKey) throw new BadRequestException('GOOGLE_GEMINI_API_KEY no está configurada');
 
@@ -305,32 +351,52 @@ Al final, incluye una sección titulada exactamente "RESUMEN_CONTEXTO:" seguida 
       const result = await model.generateContent(prompt);
       const respuestaCompleta = result.response.text();
 
-      const resumenMatch = respuestaCompleta.match(/RESUMEN_CONTEXTO:\s*(.+?)(?:\n|$)/s);
-      const resumen = resumenMatch
-        ? resumenMatch[1].trim().substring(0, 200)
-        : respuestaCompleta.substring(0, 200);
+      // Extraer el CONTEXTO_IA generado por la IA
+      const contextoMatch = respuestaCompleta.match(/\[CONTEXTO_IA\]([\s\S]*?)\[\/CONTEXTO_IA\]/);
+      const contextoGenerado = contextoMatch
+        ? contextoMatch[1].trim()
+        : respuestaCompleta.substring(0, 500);
 
-      const respuestaLimpia = respuestaCompleta.replace(/RESUMEN_CONTEXTO:[\s\S]*$/, '').trim();
+      // Limpiar la respuesta principal sacando el bloque CONTEXTO_IA
+      const respuestaLimpia = respuestaCompleta
+        .replace(/\[CONTEXTO_IA\][\s\S]*?\[\/CONTEXTO_IA\]/g, '')
+        .trim();
 
-      return { respuesta: respuestaLimpia, resumen };
+      return { respuesta: respuestaLimpia, contextoGenerado };
     } catch (error) {
       throw new BadRequestException(`Error al consultar Gemini: ${error.message}`);
     }
   }
 
-  private async actualizarPrevioIA(
+  private async actualizarContextoIA(
     pacienteId: string,
-    nuevoResumen: string,
-    previoExistente?: PrevioIA | null,
+    contextoGenerado: string,
+    contextoExistente?: ContextoIA | null,
   ): Promise<void> {
-    if (previoExistente) {
-      const contextoAcumulado = `${previoExistente.registroIA} | ${nuevoResumen}`.substring(0, 1000);
-      previoExistente.registroIA = contextoAcumulado;
-      previoExistente.fechaRegistro = new Date();
-      await this.previoIARepository.save(previoExistente);
+    // Si la IA dijo que no hay cambios, no hacer nada
+    if (contextoGenerado.includes('SIN_CAMBIOS_RELEVANTES')) return;
+
+    const esParcial = contextoGenerado.startsWith('ACTUALIZACION:');
+    const tipo = esParcial ? TipoContexto.ACTUALIZACION : TipoContexto.NUEVO;
+
+    if (contextoExistente) {
+      if (esParcial) {
+        // Agregar la actualización al contexto existente
+        const actualizacion = contextoGenerado.replace('ACTUALIZACION:', '').trim();
+        contextoExistente.contenidoContexto = `${contextoExistente.contenidoContexto}\n\n[Actualización]\n${actualizacion}`;
+      } else {
+        // Reemplazar completamente
+        contextoExistente.contenidoContexto = contextoGenerado;
+      }
+      contextoExistente.tipo = tipo;
+      await this.contextoIARepository.save(contextoExistente);
     } else {
-      const nuevo = this.previoIARepository.create({ pacienteId, registroIA: nuevoResumen });
-      await this.previoIARepository.save(nuevo);
+      const nuevo = this.contextoIARepository.create({
+        pacienteId,
+        contenidoContexto: contextoGenerado,
+        tipo,
+      });
+      await this.contextoIARepository.save(nuevo);
     }
   }
 }

@@ -6,6 +6,7 @@ import { ConsultaAsistente } from './entities/consulta-asistente.entity';
 import { CreateConsultaAsistenteDto } from './dto/create-consulta-asistente.dto';
 import { Paciente } from '../pacientes/entities/paciente.entity';
 import { Consulta } from '../consultas/entities/consulta.entity';
+import { ContextoIA } from '../analisis-ia-general/entities/contexto-ia.entity';
 
 @Injectable()
 export class AsistenteMedicoService {
@@ -16,25 +17,31 @@ export class AsistenteMedicoService {
     private pacientesRepository: Repository<Paciente>,
     @InjectRepository(Consulta)
     private consultasRepository: Repository<Consulta>,
+    @InjectRepository(ContextoIA)
+    private contextoIARepository: Repository<ContextoIA>,
   ) {}
 
   async consultar(dto: CreateConsultaAsistenteDto, medicoId: string): Promise<ConsultaAsistente> {
     const { pacienteId, consultaMedico } = dto;
 
-    // Cargar paciente con todas sus relaciones clínicas
     const paciente = await this.pacientesRepository.findOne({
       where: { id: pacienteId, medicoId },
       relations: ['novedades', 'estudios'],
     });
     if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
-    // Cargar consultas del paciente
     const consultas = await this.consultasRepository.find({
       where: { pacienteId, medicoId },
       order: { createdAt: 'DESC' },
     });
 
-    const prompt = this.construirPrompt(paciente, consultas, consultaMedico);
+    // Cargar contexto IA del paciente
+    const contextoIA = await this.contextoIARepository.findOne({
+      where: { pacienteId },
+      order: { ultimaActualizacion: 'DESC' },
+    });
+
+    const prompt = this.construirPrompt(paciente, consultas, contextoIA?.contenidoContexto, consultaMedico);
     const respuesta = await this.consultarGemini(prompt);
 
     const consulta = this.consultaAsistenteRepository.create({
@@ -50,9 +57,7 @@ export class AsistenteMedicoService {
   }
 
   async findByPaciente(pacienteId: string, medicoId: string): Promise<ConsultaAsistente[]> {
-    const paciente = await this.pacientesRepository.findOne({
-      where: { id: pacienteId, medicoId },
-    });
+    const paciente = await this.pacientesRepository.findOne({ where: { id: pacienteId, medicoId } });
     if (!paciente) throw new NotFoundException('Paciente no encontrado');
 
     return await this.consultaAsistenteRepository.find({
@@ -70,8 +75,6 @@ export class AsistenteMedicoService {
     return consulta;
   }
 
-  // ─── Privados ────────────────────────────────────────────────────────────────
-
   private calcularEdad(fechaNacimiento: Date): number {
     const hoy = new Date();
     const nacimiento = new Date(fechaNacimiento);
@@ -84,6 +87,7 @@ export class AsistenteMedicoService {
   private construirPrompt(
     paciente: Paciente,
     consultas: Consulta[],
+    contextoAnterior: string | undefined,
     consultaMedico: string,
   ): string {
     const edad = this.calcularEdad(paciente.fechaNacimiento);
@@ -126,6 +130,10 @@ export class AsistenteMedicoService {
           .join('\n')
       : 'Sin consultas registradas.';
 
+    const contextoTexto = contextoAnterior
+      ? `\n**CONTEXTO_IA (resumen clínico previo del paciente):**\n[CONTEXTO_IA]\n${contextoAnterior}\n[/CONTEXTO_IA]\n`
+      : '\n**CONTEXTO_IA:** No existe contexto previo para este paciente.\n';
+
     return `Eres un médico especialista en medicina de precisión, con enfoque en análisis clínico integral utilizando la metodología ECAMM (Evaluación Clínica Avanzada con Modelos Médicos).
 
 Tu rol no es reemplazar al médico tratante, sino asistir en la interpretación clínica avanzada, identificando patrones, relaciones entre variables y posibles riesgos, en base a la información disponible.
@@ -147,6 +155,8 @@ En tu análisis:
 - Si detectas datos críticos (riesgo alto, urgencia, contradicciones relevantes), debes destacarlo explícitamente.
 
 ${perfilPaciente}
+
+${contextoTexto}
 
 **EVENTOS CLÍNICOS DEL PACIENTE (ordenados del más reciente al más antiguo):**
 ${novedadesTexto}

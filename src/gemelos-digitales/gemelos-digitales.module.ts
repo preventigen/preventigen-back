@@ -6,9 +6,10 @@ import { GemeloDigital } from './entities/gemelo-digital.entity';
 import { SimulacionTratamiento } from './entities/simulacion-tratamiento.entity';
 import { Paciente } from '../pacientes/entities/paciente.entity';
 import { Consulta } from '../consultas/entities/consulta.entity';
+import { ContextoIA } from '../analisis-ia-general/entities/contexto-ia.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([GemeloDigital, SimulacionTratamiento, Paciente, Consulta])],
+  imports: [TypeOrmModule.forFeature([GemeloDigital, SimulacionTratamiento, Paciente, Consulta, ContextoIA])],
   controllers: [GemelosDigitalesController],
   providers: [GemelosDigitalesService],
   exports: [TypeOrmModule],

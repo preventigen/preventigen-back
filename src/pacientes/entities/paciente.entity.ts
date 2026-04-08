@@ -4,7 +4,7 @@ import { Consulta } from '../../consultas/entities/consulta.entity';
 import { EstudioMedico } from '../../estudios-medicos/entities/estudio-medico.entity';
 import { NovedadClinica } from '../../novedades-clinicas/entities/novedad-clinica.entity';
 import { AnalisisIA } from '../../analisis-ia-general/entities/analisis-ia.entity';
-import { PrevioIA } from '../../analisis-ia-general/entities/previo-ia.entity';
+import { ContextoIA } from '../../analisis-ia-general/entities/contexto-ia.entity';
 import { DatoMedico } from '../../datos-medicos/entities/dato-medico.entity';
 
 export enum Genero {
@@ -24,7 +24,6 @@ export class Paciente {
   @JoinColumn({ name: 'medicoId' })
   medico: Medico;
 
-  // Datos personales
   @Column()
   nombre: string;
 
@@ -37,7 +36,6 @@ export class Paciente {
   @Column({ type: 'enum', enum: Genero })
   genero: Genero;
 
-  // Datos médicos generales
   @Column({ nullable: true })
   diagnosticoPrincipal: string;
 
@@ -68,15 +66,15 @@ export class Paciente {
   @OneToMany(() => DatoMedico, datoMedico => datoMedico.paciente)
   datosMedicos: DatoMedico[];
 
+  @OneToMany(() => AnalisisIA, analisis => analisis.paciente)
+  analisis: AnalisisIA[];
+
+  @OneToMany(() => ContextoIA, contexto => contexto.paciente)
+  contextosIA: ContextoIA[];
+
   @CreateDateColumn()
   createdAt: Date;
 
   @UpdateDateColumn()
   updatedAt: Date;
-
-  @OneToMany(() => AnalisisIA, analisis => analisis.paciente)
-  analisis: AnalisisIA[];
-
-  @OneToMany(() => PrevioIA, previo => previo.paciente)
-  previosIA: PrevioIA[];
 }
